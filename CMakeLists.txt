@@ -6,5 +6,5 @@ set(CMAKE_CXX_STANDARD 17)
 add_subdirectory(3rdparty/enet)
 include_directories(3rdparty/enet/include)
 
-add_executable(DecMtxPeer main.cpp)
+add_executable(DecMtxPeer main.cpp platform.cpp)
 target_link_libraries(DecMtxPeer PUBLIC enet)
