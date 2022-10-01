@@ -6,6 +6,7 @@
 #include <sstream>
 #include <random>
 #include <unordered_map>
+#include <mutex>
 
 #include "json.hpp"
 
@@ -78,6 +79,7 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
 
         std::cout << "I received a list of the nodes in the network" << std::endl;
         nlohmann::json j = nlohmann::json::parse(payload);
+        std::cout << j.dump(4) << std::endl;
         const std::set<int32_t> nodes = j;
         std::set<enet_uint32> nodesu;
         for (auto i: nodes) {
@@ -193,11 +195,26 @@ int main() {
     std::string myRandomNumberStr = std::to_string(myRandomNumber);
     std::cout << "My random number: " << myRandomNumber << std::endl;
 
+    std::mutex mtx;
+
+    std::thread sendThread = std::thread([&](){
+        mtx.lock();
+        for (auto ip: gConnectedTo) {
+            ENetPeer *peer = gIpToPeer.at(ip);
+            send("IMALIVE", myRandomNumberStr, peer);
+        }
+        mtx.unlock();
+        std::this_thread::sleep_for(500ms);
+
+    });
+
     while (true) {
         std::cout << "..." << std::endl;
 
+        mtx.lock();
+
         ENetEvent event;
-        if (enet_host_service(gClient, &event, 500)) {
+        if (enet_host_service(gClient, &event, 0)) {
 
             if (event.type == ENET_EVENT_TYPE_CONNECT) {
                 char hostStr[100];
@@ -233,13 +250,7 @@ int main() {
             }
         }
 
-        for (auto ip: gConnectedTo) {
-            ENetPeer *peer = gIpToPeer.at(ip);
-            send("IMALIVE", myRandomNumberStr, peer);
-        }
-
-        std::this_thread::sleep_for(500ms);
-
+        mtx.unlock();
 
 #pragma clang diagnostic pop
 
