@@ -5,6 +5,7 @@
 #include <vector>
 #include <sstream>
 #include <random>
+#include <unordered_map>
 
 #include "json.hpp"
 
@@ -13,6 +14,7 @@ using namespace std::chrono_literals;
 // Globals ;)
 std::set<enet_uint32> gKnownNodes; // ip addresses
 std::set<enet_uint32> gConnectedTo;
+std::unordered_map<enet_uint32, ENetPeer *> gIpToPeer;
 ENetHost *gClient;
 
 #define CONSTPORT 1234
@@ -44,8 +46,11 @@ std::vector<std::string> split(const std::string &str, char delimiter) {
 }
 
 void send(const std::string &type, const std::string &payload, ENetPeer *peer) {
-    std::cout << "Sending " << type << " to " << peer->address.host << std::endl;
-    auto random_variable = ((double) rand() / (RAND_MAX)) + 1;
+    char hostStr[100];
+    enet_address_get_host_ip(&peer->address, hostStr, 100);
+    std::cout << "Sending " << type << " to " << hostStr << std::endl;
+
+    auto random_variable = ((double) rand() / (RAND_MAX));
     if (random_variable <= 1) {
         std::string packetString = type + ";" + payload;
         ENetPacket *packet = enet_packet_create(
@@ -59,14 +64,20 @@ void send(const std::string &type, const std::string &payload, ENetPeer *peer) {
 
 
 void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
-    std::cout << "The type is: " << type << std::endl;
+    char hostStr[100];
+    enet_address_get_host_ip(&peer->address, hostStr, 100);
+    std::cout << "The type is: " << type << "from" << hostStr << std::endl;
 
     if (type == "NETWORK") {
 
         std::cout << "I received a list of the nodes in the network" << std::endl;
-        nlohmann::json j = payload;
-        const std::set<enet_uint32> nodes = j;
-        gKnownNodes = nodes;
+        nlohmann::json j = nlohmann::json::parse(payload);
+        const std::set<int32_t> nodes = j;
+        std::set<enet_uint32> nodesu;
+        for (auto i: nodes) {
+            nodesu.insert(i);
+        }
+        gKnownNodes = nodesu;
 
         // Connect to new nodes not known before
         for (auto &node: gKnownNodes) {
@@ -91,10 +102,10 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
                         "No available peers for initiating an ENet connection.\n");
                 exit(EXIT_FAILURE);
             }
-            gConnectedTo.insert(node);
+            //gConnectedTo.insert(node);
         }
     } else if (type == "IMALIVE") {
-        std::cout << payload << std::endl;
+        std::cout << "IMALIVE RECV: " << payload << std::endl;
     }
 }
 
@@ -166,6 +177,7 @@ int main() {
                     "No available peers for initiating an ENet connection.\n");
             exit(EXIT_FAILURE);
         }
+        gIpToPeer.insert(std::pair(address.host, peer));
     }
 
     std::random_device dev;
@@ -178,26 +190,24 @@ int main() {
     while (true) {
         std::cout << "..." << std::endl;
 
-        for (int i = 0; i < gClient->connectedPeers; i++) {
-            send("IMALIVE", myRandomNumberStr, &gClient->peers[i]);
-        }
-
         ENetEvent event;
         if (enet_host_service(gClient, &event, 2500)) {
 
             if (event.type == ENET_EVENT_TYPE_CONNECT) {
                 char hostStr[100];
                 enet_address_get_host_ip(&event.peer->address, hostStr, 100);
-                std::cout << "Connection from " << hostStr << " succeeded." << std::endl;
+                std::cout << "Connection to " << hostStr << " succeeded." << std::endl;
 
                 gConnectedTo.insert(event.peer->address.host);
+                gIpToPeer.insert(std::pair(event.peer->address.host, event.peer));
                 gKnownNodes.insert(event.peer->address.host);
 
                 nlohmann::json j = gKnownNodes;
                 std::string outPayload = j.dump();
-                for (int i = 0; i < gClient->peerCount; i++) {
-                    // send network to connected peers
-                    send("NETWORK", outPayload, &gClient->peers[i]);
+
+                for (auto ip: gConnectedTo) {
+                    ENetPeer *peer = gIpToPeer.at(ip);
+                    send("NETWORK", outPayload, peer);
                 }
             }
 
@@ -212,15 +222,16 @@ int main() {
             }
 
             if (event.type == ENET_EVENT_TYPE_RECEIVE) {
-                printf("A packet of length %zu containing `%s` was received from %s on channel %u.\n",
-                       event.packet->dataLength,
-                       event.packet->data,
-                       event.peer->data,
-                       event.channelID);
                 std::vector<std::string> recvDataDecode = split((char *) event.packet->data, ';');
                 handleReceive(recvDataDecode[0], recvDataDecode[1], event.peer);
             }
         }
+
+        for (auto ip: gConnectedTo) {
+            ENetPeer *peer = gIpToPeer.at(ip);
+            send("IMALIVE", myRandomNumberStr, peer);
+        }
+
 #pragma clang diagnostic pop
 
     }
