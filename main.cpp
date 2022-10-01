@@ -73,7 +73,7 @@ void send(const std::string &type, const std::string &payload, ENetPeer *peer) {
 void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
     char hostStr[100];
     enet_address_get_host_ip(&peer->address, hostStr, 100);
-    std::cout << "The type is: " << type << "from" << hostStr << std::endl;
+    std::cout << "Incoming message " << type << "from: " << hostStr << std::endl;
 
     if (type == "NETWORK") {
 
@@ -209,14 +209,16 @@ int main() {
     std::mutex mtx;
 
     std::thread sendThread = std::thread([&](){
-        mtx.lock();
-        for (auto ip: gConnectedTo) {
-            ENetPeer *peer = gIpToPeer.at(ip);
-            send("IMALIVE", myRandomNumberStr, peer);
+        while(true)
+        {
+            mtx.lock();
+            for (auto ip: gConnectedTo) {
+                ENetPeer *peer = gIpToPeer.at(ip);
+                send("IMALIVE", myRandomNumberStr, peer);
+            }
+            mtx.unlock();
+            std::this_thread::sleep_for(500ms);
         }
-        mtx.unlock();
-        std::this_thread::sleep_for(500ms);
-
     });
 
     while (true) {
