@@ -50,6 +50,12 @@ void send(const std::string &type, const std::string &payload, ENetPeer *peer) {
     enet_address_get_host_ip(&peer->address, hostStr, 100);
     std::cout << "Sending " << type << " to " << hostStr << std::endl;
 
+    if(peer->address.host == gClient->address.host)
+    {
+        std::cout << "Not sending this to meself!\n";
+        return;
+    }
+
     auto random_variable = ((double) rand() / (RAND_MAX));
     if (random_variable <= 1) {
         std::string packetString = type + ";" + payload;
