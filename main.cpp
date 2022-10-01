@@ -190,10 +190,8 @@ int main() {
     while (true) {
         std::cout << "..." << std::endl;
 
-        std::this_thread::sleep_for(2500ms);
-
         ENetEvent event;
-        if (enet_host_service(gClient, &event, 0)) {
+        if (enet_host_service(gClient, &event, 500)) {
 
             if (event.type == ENET_EVENT_TYPE_CONNECT) {
                 char hostStr[100];
@@ -233,6 +231,9 @@ int main() {
             ENetPeer *peer = gIpToPeer.at(ip);
             send("IMALIVE", myRandomNumberStr, peer);
         }
+
+        std::this_thread::sleep_for(500ms);
+
 
 #pragma clang diagnostic pop
 
