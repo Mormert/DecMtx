@@ -77,7 +77,7 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
 
     if (type == "NETWORK") {
 
-        std::cout << "I received a list of the nodes in the network" << std::endl;
+        std::cout << "I received a list of the nodes in the network: " << std::endl;
         nlohmann::json j = nlohmann::json::parse(payload);
         std::cout << j.dump(4) << std::endl;
         const std::set<int32_t> nodes = j;
@@ -86,6 +86,17 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
             nodesu.insert(i);
         }
         gKnownNodes = nodesu;
+
+
+        for(auto n : gKnownNodes)
+        {
+            char hostStr[100];
+            ENetAddress address;
+            address.port = CONSTPORT;
+            address.host = n;
+            enet_address_get_host_ip(&address, hostStr, 100);
+            std::cout << hostStr << std::endl;
+        }
 
         // Connect to new nodes not known before
         for (auto &node: gKnownNodes) {
