@@ -38,9 +38,8 @@ void Request(CriticalSection& cs){
     Entering();
 }
 
-
-
-
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "EndlessLoop"
 int main() {
 
     std::cout << "Enter someone in the overlay networks ip address (or 0 if you're first)" << std::endl;
@@ -83,15 +82,49 @@ int main() {
     }
 
     ENetPeer *peer;
-    enet_address_set_host(&address, peerIP.c_str());
-    address.port = 1234;
-    /* Initiate the connection, allocating the channel 1. */
-    peer = enet_host_connect(client, &address, 1, 0);
-    if (peer == nullptr) {
-        fprintf(stderr,
-                "No available peers for initiating an ENet connection.\n");
-        exit(EXIT_FAILURE);
+
+    if(!iAmFirst){
+        enet_address_set_host(&address, peerIP.c_str());
+        address.port = 1234;
+        /* Initiate the connection, allocating the two channels 0 and 1. */
+        peer = enet_host_connect(client, &address, 1, 0);
+        if (peer == nullptr) {
+            fprintf(stderr,
+                    "No available peers for initiating an ENet connection.\n");
+            exit(EXIT_FAILURE);
+        }
     }
+
+    ENetEvent event;
+
+    while(true){
+        std::cout << "..." << std::endl;
+        if (enet_host_service(client, &event, 100))
+
+            if(event.type == ENET_EVENT_TYPE_CONNECT){
+                char hostStr[100];
+                enet_address_get_host_ip(&event.peer->address, hostStr, 100);
+                std::cout << "Connection from " << hostStr << " succeeded." << std::endl;
+            }
+
+            if(event.type == ENET_EVENT_TYPE_DISCONNECT) {
+                char hostStr[100];
+                enet_address_get_host_ip(&event.peer->address, hostStr, 100);
+                std::cout << "Disconnection from " << hostStr << " succeeded." << std::endl;
+            }
+
+        if (event.type == ENET_EVENT_TYPE_RECEIVE) {
+            printf("A packet of length %zu containing `%s` was received from %s on channel %u.\n",
+                   event.packet->dataLength,
+                   event.packet->data,
+                   event.peer->data,
+                   event.channelID);
+
+
+        }
+
+    }
+#pragma clang diagnostic pop
 
     return 0;
 }
