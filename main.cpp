@@ -123,8 +123,8 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
             }
             //gConnectedTo.insert(node);
         }
-    } else if (type == "IMALIVE") {
-        std::cout << "IMALIVE RECV: " << payload << std::endl;
+    } else if (type == "IM_ALIVE") {
+        std::cout << "IM_ALIVE RECV: " << payload << std::endl;
     }
 }
 
@@ -214,7 +214,7 @@ int main() {
             mtx.lock();
             for (auto ip: gConnectedTo) {
                 ENetPeer *peer = gIpToPeer.at(ip);
-                send("IMALIVE", myRandomNumberStr, peer);
+                send("IM_ALIVE", myRandomNumberStr, peer);
             }
             mtx.unlock();
             std::this_thread::sleep_for(500ms);
