@@ -209,8 +209,6 @@ int main() {
     });
 
     while (true) {
-        std::cout << "..." << std::endl;
-
         mtx.lock();
 
         ENetEvent event;
