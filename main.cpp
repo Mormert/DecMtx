@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <fstream>
+#include <future>
 #include <map>
 
 #include "json.hpp"
@@ -218,7 +219,7 @@ void Entering()
 
     for (int i = 0; i < 5; i++)
     {
-        std::cout << " ------------------------ I am in the critical section! ------------------------" << std::endl;
+        std::cout << " ------------------------ I am in the critical section! ------------------------ " << gConnectedTo.size() << std::endl;
         std::this_thread::sleep_for(1000ms);
     }
 
@@ -418,6 +419,10 @@ int main()
                     {
                         gConnectedTo.erase(it);
                     }
+                    else
+                    {
+                        continue;   // reconnection failed, don't try again
+                    }
                 }
 
                 {
@@ -434,6 +439,14 @@ int main()
                     {
                         criticalSection.mRivals.erase(it);
                     }
+                }
+
+
+                auto oldNewPeer = enet_host_connect(gClient, &event.peer->address, 1, 0);
+                if (oldNewPeer == nullptr)
+                {
+                    fprintf(stderr, "No available peers for initiating an ENet connection.\n");
+                    exit(EXIT_FAILURE);
                 }
 
             }
