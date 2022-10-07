@@ -16,79 +16,90 @@ using namespace std::chrono_literals;
 std::set<enet_uint32> gKnownNodes; // ip addresses
 std::set<enet_uint32> gConnectedTo;
 std::unordered_map<enet_uint32, ENetPeer *> gIpToPeer;
+ENetAddress gMyAddress;
 ENetHost *gClient;
 
 #define CONSTPORT 1234
 
-enum class CriticalSectionState {
+enum class CriticalSectionState
+{
     FREE,
     OCCUPIED,
     REQUESTED
 };
 
-struct CriticalSection {
+struct CriticalSection
+{
     CriticalSectionState mState;
     int32_t mTime{};
+    int32_t mMyRequestTime{};
     std::set<int32_t> mRivals;
 
     std::set<int32_t> mGrantsRecvFrom;
 };
 
-std::vector<std::string> split(const std::string &str, char delimiter) {
+CriticalSection criticalSection;
+
+std::vector<std::string> split(const std::string &str, char delimiter)
+{
     std::vector<std::string> internal;
     std::stringstream ss(str);
     std::string tok;
 
-    while (getline(ss, tok, delimiter)) {
+    while (getline(ss, tok, delimiter))
+    {
         internal.push_back(tok);
     }
 
     return internal;
 }
 
-void send(const std::string &type, const std::string &payload, ENetPeer *peer) {
+void send(const std::string &type, const std::string &payload, ENetPeer *peer)
+{
     char hostStr[100];
     enet_address_get_host_ip(&peer->address, hostStr, 100);
     std::cout << "Sending " << type << " to " << hostStr << std::endl;
 
-    if(peer->address.host == gClient->address.host)
+    if (peer->address.host == gMyAddress.host)
     {
         std::cout << "Not sending this to meself!\n";
         return;
     }
 
-    auto random_variable = ((double) rand() / (RAND_MAX));
-    if (random_variable <= 1) {
+    auto random_variable = ((double)rand() / (RAND_MAX));
+    if (random_variable <= 1)
+    {
         std::string packetString = type + ";" + payload;
         ENetPacket *packet = enet_packet_create(
-                packetString.c_str(),
-                strlen(packetString.c_str()) + 1,
-                ENET_PACKET_FLAG_RELIABLE);
+            packetString.c_str(),
+            strlen(packetString.c_str()) + 1,
+            ENET_PACKET_FLAG_RELIABLE);
 
         enet_peer_send(peer, 0, packet);
     }
 }
 
-
-void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
+void handleReceive(std::string &type, std::string &payload, ENetPeer *peer)
+{
     char hostStr[100];
     enet_address_get_host_ip(&peer->address, hostStr, 100);
     std::cout << "Incoming message " << type << "from: " << hostStr << std::endl;
 
-    if (type == "NETWORK") {
+    if (type == "NETWORK")
+    {
 
         std::cout << "I received a list of the nodes in the network: " << std::endl;
         nlohmann::json j = nlohmann::json::parse(payload);
         std::cout << j.dump(4) << std::endl;
         const std::set<int32_t> nodes = j;
         std::set<enet_uint32> nodesu;
-        for (auto i: nodes) {
+        for (auto i : nodes)
+        {
             nodesu.insert(i);
         }
         gKnownNodes = nodesu;
 
-
-        for(auto n : gKnownNodes)
+        for (auto n : gKnownNodes)
         {
             char hostStr[100];
             ENetAddress address;
@@ -99,14 +110,17 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
         }
 
         // Connect to new nodes not known before
-        for (auto &node: gKnownNodes) {
-            if (node == gClient->address.host) {
+        for (auto &node : gKnownNodes)
+        {
+            if (node == gMyAddress.host)
+            {
                 // don't connect to ourself guard
                 continue;
             }
 
             auto it = gConnectedTo.find(node);
-            if (it != gConnectedTo.end()) {
+            if (it != gConnectedTo.end())
+            {
                 // don't connect twice
                 continue;
             }
@@ -116,32 +130,108 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer) {
             address.port = CONSTPORT;
             ENetPeer *newPeer;
             newPeer = enet_host_connect(gClient, &address, 1, 0);
-            if (newPeer == nullptr) {
+            if (newPeer == nullptr)
+            {
                 fprintf(stderr,
                         "No available peers for initiating an ENet connection.\n");
                 exit(EXIT_FAILURE);
             }
-            //gConnectedTo.insert(node);
+            // gConnectedTo.insert(node);
         }
-    } else if (type == "IM_ALIVE") {
+    }
+    else if (type == "IM_ALIVE")
+    {
         std::cout << "IM_ALIVE RECV: " << payload << std::endl;
     }
-}
-
-void Entering() {
-    for (int i = 0; i < 5; i++) {
-        std::cout << "I am in the critical section!";
-        std::this_thread::sleep_for(1000ms);
+    else if (type == "ENTER")
+    {
+        if (criticalSection.mState == CriticalSectionState::FREE)
+        {
+            send("GRANT", "", peer);
+        }
+        else if (criticalSection.mState == CriticalSectionState::REQUESTED)
+        {
+            int payloadInt = std::stoi(payload);
+            if (payloadInt < criticalSection.mMyRequestTime)
+            {
+                send("GRANT", "", peer);
+            }
+            else if (payloadInt > criticalSection.mMyRequestTime)
+            {
+                // add the rival
+                criticalSection.mRivals.insert(peer->address.host);
+            }
+            else if (payloadInt == criticalSection.mMyRequestTime)
+            {
+                // compare ip with my ip
+                if (peer->address.host < gMyAddress.host)
+                {
+                    send("GRANT", "", peer);
+                }
+                else
+                {
+                    criticalSection.mRivals.insert(peer->address.host);
+                }
+            }
+        }
+        else
+        { // Occupied
+            criticalSection.mRivals.insert(peer->address.host);
+        }
+    }
+    else if (type == "GRANT")
+    {
+        criticalSection.mGrantsRecvFrom.insert(peer->address.host);
+        /* if(criticalSection.mGrantsRecvFrom.size() == gConnectedTo.size() - 1){}*/
     }
 }
 
-void Request(CriticalSection &cs) {
+void Entering()
+{
+    criticalSection.mState = CriticalSectionState::OCCUPIED;
 
-    cs.mState = CriticalSectionState::REQUESTED;
-    cs.mTime++;
+    for (int i = 0; i < 5; i++)
+    {
+        std::cout << " ------------------------ I am in the critical section! ------------------------\n";
+        std::this_thread::sleep_for(1000ms);
+    }
+
+    criticalSection.mState = CriticalSectionState::FREE;
+
+    // Exit the critical section ...
+    for (auto ip : criticalSection.mRivals)
+    {
+        ENetPeer *peer = gIpToPeer.at(ip);
+        send("GRANT", "", peer);
+    }
+}
+
+void Request()
+{
+
+    criticalSection.mState = CriticalSectionState::REQUESTED;
+    criticalSection.mTime++;
+    criticalSection.mMyRequestTime = criticalSection.mTime;
 
     // Send enter message to all other nodes containing the requested
     // critical section, the node's ID and the node's time.
+
+    for (auto &ip : gConnectedTo)
+    {
+        ENetPeer *peer = gIpToPeer.at(ip);
+        send("ENTER", std::to_string(criticalSection.mMyRequestTime), peer);
+    }
+
+    // Wait until we have all the grants ...
+    // TODO: Unsure if this can cause problems
+    // Ugly solution with polling...
+    while (criticalSection.mGrantsRecvFrom.size() < gConnectedTo.size() - 1)
+    {
+        // spin spin spin
+        std::this_thread::sleep_for(1ms);
+    }
+
+    criticalSection.mGrantsRecvFrom.clear();
 
     Entering();
 }
@@ -149,23 +239,33 @@ void Request(CriticalSection &cs) {
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "EndlessLoop"
 
-int main() {
+int main()
+{
+
+    std::cout << "Enter your own IP address: ";
+    std::string myIp;
+    std::cin >> myIp;
+
+    enet_address_set_host(&gMyAddress, myIp.c_str());
+
+    std::cout << gMyAddress.host << std::endl;
 
     std::cout << "Enter someone in the overlay networks ip address (or 0 if you're first)" << std::endl;
     std::string peerIP;
     std::cin >> peerIP;
     bool iAmFirst = false;
-    if (peerIP == "0") {
+    if (peerIP == "0")
+    {
         iAmFirst = true;
     }
 
-    CriticalSection criticalSection;
     criticalSection.mState = CriticalSectionState::FREE;
     criticalSection.mTime = 0;
     criticalSection.mRivals = {};
     criticalSection.mGrantsRecvFrom = {};
 
-    if (enet_initialize() != 0) {
+    if (enet_initialize() != 0)
+    {
         std::cout << "ENet init failure occurred!" << std::endl;
         return EXIT_FAILURE;
     }
@@ -179,19 +279,22 @@ int main() {
     // Bind the client to constant port 1234.
     address.port = CONSTPORT;
     gClient = enet_host_create(&address, 32, 1, 0, 0);
-    if (gClient == nullptr) {
+    if (gClient == nullptr)
+    {
         fprintf(stderr,
                 "An error occurred while trying to create an ENet client host.\n");
         exit(EXIT_FAILURE);
     }
 
     // Connect to first node
-    if (!iAmFirst) {
+    if (!iAmFirst)
+    {
         enet_address_set_host(&address, peerIP.c_str());
         address.port = 1234;
         /* Initiate the connection, allocating the two channels 0 and 1. */
         ENetPeer *peer = enet_host_connect(gClient, &address, 1, 0);
-        if (peer == nullptr) {
+        if (peer == nullptr)
+        {
             fprintf(stderr,
                     "No available peers for initiating an ENet connection.\n");
             exit(EXIT_FAILURE);
@@ -208,7 +311,8 @@ int main() {
 
     std::mutex mtx;
 
-    std::thread sendThread = std::thread([&](){
+    std::thread sendThread = std::thread([&]()
+                                         {
         while(true)
         {
             mtx.lock();
@@ -216,18 +320,33 @@ int main() {
                 ENetPeer *peer = gIpToPeer.at(ip);
                 send("IM_ALIVE", myRandomNumberStr, peer);
             }
-            mtx.unlock();
-            std::this_thread::sleep_for(500ms);
-        }
-    });
 
-    while (true) {
+            mtx.unlock();
+            std::this_thread::sleep_for(10s);
+        } });
+
+    std::thread sendThread2 = std::thread([&]()
+                                          {
+        while(true)
+        {
+            mtx.lock();
+            std::cout << "Hej";
+            Request();
+
+            mtx.unlock();
+            std::this_thread::sleep_for(20s);
+        } });
+
+    while (true)
+    {
         mtx.lock();
 
         ENetEvent event;
-        if (enet_host_service(gClient, &event, 0)) {
+        if (enet_host_service(gClient, &event, 0))
+        {
 
-            if (event.type == ENET_EVENT_TYPE_CONNECT) {
+            if (event.type == ENET_EVENT_TYPE_CONNECT)
+            {
                 char hostStr[100];
                 enet_address_get_host_ip(&event.peer->address, hostStr, 100);
                 std::cout << "Connection to " << hostStr << " succeeded." << std::endl;
@@ -239,34 +358,38 @@ int main() {
                 nlohmann::json j = gKnownNodes;
                 std::string outPayload = j.dump();
 
-                for (auto ip: gConnectedTo) {
+                for (auto ip : gConnectedTo)
+                {
                     ENetPeer *peer = gIpToPeer.at(ip);
                     send("NETWORK", outPayload, peer);
                 }
             }
 
-            if (event.type == ENET_EVENT_TYPE_DISCONNECT) {
+            if (event.type == ENET_EVENT_TYPE_DISCONNECT)
+            {
                 char hostStr[100];
                 enet_address_get_host_ip(&event.peer->address, hostStr, 100);
                 std::cout << "Disconnection from " << hostStr << " succeeded." << std::endl;
                 auto it = gKnownNodes.find(event.peer->address.host);
-                if (it != gKnownNodes.end()) {
+                if (it != gKnownNodes.end())
+                {
                     gKnownNodes.erase(it);
                 }
             }
 
-            if (event.type == ENET_EVENT_TYPE_RECEIVE) {
-                std::vector<std::string> recvDataDecode = split((char *) event.packet->data, ';');
+            if (event.type == ENET_EVENT_TYPE_RECEIVE)
+            {
+                std::vector<std::string> recvDataDecode = split((char *)event.packet->data, ';');
                 handleReceive(recvDataDecode[0], recvDataDecode[1], event.peer);
             }
         }
 
         mtx.unlock();
 
-#pragma clang diagnostic pop
+        std::this_thread::sleep_for(10ms);
 
+#pragma clang diagnostic pop
     }
 
     return 0;
-
 }
