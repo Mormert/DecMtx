@@ -6,6 +6,7 @@
 
 #define ENET_BUILDING_LIB 1
 #include "enet/enet.h"
+#include <stdlib.h>
 #include <windows.h>
 #include <mmsystem.h>
 
@@ -327,21 +328,30 @@ enet_socket_send (ENetSocket socket,
         sin.sin_addr.s_addr = address -> host;
     }
 
-    if (WSASendTo (socket, 
-                   (LPWSABUF) buffers,
-                   (DWORD) bufferCount,
-                   & sentLength,
-                   0,
-                   address != NULL ? (struct sockaddr *) & sin : NULL,
-                   address != NULL ? sizeof (struct sockaddr_in) : 0,
-                   NULL,
-                   NULL) == SOCKET_ERROR)
+    float random_variable = ((double)rand() / (RAND_MAX));
+    if (random_variable <= 0.95)
     {
-       if (WSAGetLastError () == WSAEWOULDBLOCK)
-         return 0;
+        if (WSASendTo (socket, 
+                    (LPWSABUF) buffers,
+                    (DWORD) bufferCount,
+                    & sentLength,
+                    0,
+                    address != NULL ? (struct sockaddr *) & sin : NULL,
+                    address != NULL ? sizeof (struct sockaddr_in) : 0,
+                    NULL,
+                    NULL) == SOCKET_ERROR)
+        {
+        if (WSAGetLastError () == WSAEWOULDBLOCK)
+            return 0;
 
-       return -1;
+        return -1;
+        }
+    }else
+    {
+        printf("MESSAGE SEND LOSS SIMULATION\n");
+        return 0;
     }
+    
 
     return (int) sentLength;
 }
