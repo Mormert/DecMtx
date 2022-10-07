@@ -12,6 +12,8 @@
 
 #include "json.hpp"
 
+#define max(a,b) (((a) > (b)) ? (a) : (b))
+
 using namespace std::chrono_literals;
 std::map<std::string, std::string> gAddressMap = {
         {"elin", "25.38.41.160"},
@@ -31,22 +33,6 @@ std::string GetIpName(const std::string& ip)
     auto it = inverseAddressMap.find(ip);
     if(it != inverseAddressMap.end())
     {
-        if(it->second == "johan")
-        {
-            return "johan the great";
-        }
-        if(it->second == "elin")
-        {
-            return "elin the conqueror";
-        }
-        if(it->second == "alex")
-        {
-            return "alex the knight";
-        }
-        if(it->second == "john")
-        {
-            return "john the master";
-        }
         return it->second;
     }
     return ip;
@@ -75,9 +61,9 @@ struct CriticalSection
     CriticalSectionState mState;
     int32_t mTime{};
     int32_t mMyRequestTime{};
-    std::set<int32_t> mRivals;
+    std::set<enet_uint32> mRivals;
 
-    std::set<int32_t> mGrantsRecvFrom;
+    std::set<enet_uint32> mGrantsRecvFrom;
 };
 
 CriticalSection criticalSection;
@@ -132,9 +118,9 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer)
     if (type == "NETWORK")
     {
 
-        std::cout << "I received a list of the nodes in the network: " << std::endl;
+        //std::cout << "I received a list of the nodes in the network: " << std::endl;
         nlohmann::json j = nlohmann::json::parse(payload);
-        std::cout << j.dump(4) << std::endl;
+        //std::cout << j.dump(4) << std::endl;
         const std::set<int32_t> nodes = j;
         std::set<enet_uint32> nodesu;
         for (auto i : nodes)
@@ -150,7 +136,7 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer)
             address.port = CONSTPORT;
             address.host = node;
             enet_address_get_host_ip(&address, hostStr, 100);
-            std::cout << GetIpName(hostStr) << std::endl;
+            //std::cout << GetIpName(hostStr) << std::endl;
         }
 
         // Connect to new nodes not known before
@@ -223,7 +209,6 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer)
     else if (type == "GRANT")
     {
         criticalSection.mGrantsRecvFrom.insert(peer->address.host);
-        /* if(criticalSection.mGrantsRecvFrom.size() == gConnectedTo.size() - 1){}*/
     }
 }
 
@@ -254,7 +239,7 @@ void Request()
     criticalSection.mState = CriticalSectionState::REQUESTED;
     criticalSection.mTime++;
     criticalSection.mMyRequestTime = criticalSection.mTime;
-    std::cout << "Requesting at " << criticalSection.mMyRequestTime << std::endl;
+    std::cout << "Requesting at clock time: " << criticalSection.mMyRequestTime << std::endl;
 
     // Send enter message to all other nodes containing the requested
     // critical section, the node's ID and the node's time.
@@ -275,7 +260,7 @@ void Request()
     }
 
     criticalSection.mGrantsRecvFrom.clear();
-    std::cout << "Entering" << std::endl;
+    //std::cout << "Entering" << std::endl;
     Entering();
 }
 
@@ -363,13 +348,6 @@ int main()
         gIpToPeer.insert(std::pair(address.host, peer));
     }
 
-    std::random_device dev;
-    std::mt19937 rng(dev());
-    std::uniform_int_distribution<std::mt19937::result_type> dist(1, 10000); // distribution in range [1, 10000]
-    int myRandomNumber = dist(rng);
-    std::string myRandomNumberStr = std::to_string(myRandomNumber);
-    std::cout << "My random number: " << myRandomNumber << std::endl;
-
     std::thread sendThread2 = std::thread([&]()
                                           {
                                               while (true)
@@ -399,7 +377,7 @@ int main()
             {
                 char hostStr[100];
                 enet_address_get_host_ip(&event.peer->address, hostStr, 100);
-                std::cout << "Connection to " << GetIpName(hostStr) << " succeeded." << std::endl;
+                std::cout << "CONNECTION TO " << GetIpName(hostStr) << " SUCCEDED." << std::endl;
 
                 gConnectedTo.insert(event.peer->address.host);
                 gIpToPeer.insert(std::pair(event.peer->address.host, event.peer));
@@ -425,10 +403,37 @@ int main()
                 char hostStr[100];
                 enet_address_get_host_ip(&event.peer->address, hostStr, 100);
                 std::cout << "DISCONNECTION FROM " << GetIpName(hostStr) << "!" << std::endl;
-                auto it = gKnownNodes.find(event.peer->address.host);
-                if (it != gKnownNodes.end())
+
                 {
-                    gKnownNodes.erase(it);
+                    auto it = gKnownNodes.find(event.peer->address.host);
+                    if (it != gKnownNodes.end())
+                    {
+                        gKnownNodes.erase(it);
+                    }
+                }
+
+                {
+                    auto it = gConnectedTo.find(event.peer->address.host);
+                    if (it != gConnectedTo.end())
+                    {
+                        gConnectedTo.erase(it);
+                    }
+                }
+
+                {
+                    auto it = criticalSection.mGrantsRecvFrom.find(event.peer->address.host);
+                    if (it != criticalSection.mGrantsRecvFrom.end())
+                    {
+                        criticalSection.mGrantsRecvFrom.erase(it);
+                    }
+                }
+
+                {
+                    auto it = criticalSection.mRivals.find(event.peer->address.host);
+                    if (it != criticalSection.mRivals.end())
+                    {
+                        criticalSection.mRivals.erase(it);
+                    }
                 }
 
             }
