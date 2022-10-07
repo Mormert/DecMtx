@@ -7,10 +7,50 @@
 #include <random>
 #include <unordered_map>
 #include <mutex>
+#include <fstream>
+#include <map>
 
 #include "json.hpp"
 
 using namespace std::chrono_literals;
+std::map<std::string, std::string> gAddressMap = {
+        {"elin", "25.38.41.160"},
+        {"alex", "25.37.205.76"},
+        {"johan", "25.37.213.180"},
+        {"john", "25.46.31.99"}};
+
+std::string GetIpName(const std::string& ip)
+{
+
+    std::map<std::string, std::string> inverseAddressMap;
+    for(auto i : gAddressMap)
+    {
+        inverseAddressMap.insert(std::pair(i.second, i.first));
+    }
+
+    auto it = inverseAddressMap.find(ip);
+    if(it != inverseAddressMap.end())
+    {
+        if(it->second == "johan")
+        {
+            return "johan the great";
+        }
+        if(it->second == "elin")
+        {
+            return "elin the conqueror";
+        }
+        if(it->second == "alex")
+        {
+            return "alex the knight";
+        }
+        if(it->second == "john")
+        {
+            return "john the master";
+        }
+        return it->second;
+    }
+    return ip;
+}
 
 // Globals ;)
 std::set<enet_uint32> gKnownNodes; // ip addresses
@@ -18,6 +58,8 @@ std::set<enet_uint32> gConnectedTo;
 std::unordered_map<enet_uint32, ENetPeer *> gIpToPeer;
 ENetAddress gMyAddress;
 ENetHost *gClient;
+
+std::mutex gEnetMutex;
 
 #define CONSTPORT 1234
 
@@ -58,7 +100,7 @@ void send(const std::string &type, const std::string &payload, ENetPeer *peer)
 {
     char hostStr[100];
     enet_address_get_host_ip(&peer->address, hostStr, 100);
-    std::cout << "Sending " << type << " to " << hostStr << std::endl;
+    std::cout << "\nSending " << type << " to " << GetIpName(hostStr) << std::endl;
 
     if (peer->address.host == gMyAddress.host)
     {
@@ -70,10 +112,12 @@ void send(const std::string &type, const std::string &payload, ENetPeer *peer)
     if (random_variable <= 1)
     {
         std::string packetString = type + ";" + payload;
+
+        std::lock_guard<std::mutex> lock(gEnetMutex);
         ENetPacket *packet = enet_packet_create(
-            packetString.c_str(),
-            strlen(packetString.c_str()) + 1,
-            ENET_PACKET_FLAG_RELIABLE);
+                packetString.c_str(),
+                strlen(packetString.c_str()) + 1,
+                ENET_PACKET_FLAG_RELIABLE);
 
         enet_peer_send(peer, 0, packet);
     }
@@ -83,7 +127,7 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer)
 {
     char hostStr[100];
     enet_address_get_host_ip(&peer->address, hostStr, 100);
-    std::cout << "Incoming message " << type << "from: " << hostStr << std::endl;
+    std::cout << "\nIncoming message " << type << " from: " << GetIpName(hostStr) << std::endl;
 
     if (type == "NETWORK")
     {
@@ -99,14 +143,14 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer)
         }
         gKnownNodes = nodesu;
 
-        for (auto n : gKnownNodes)
+        for (auto node : gKnownNodes)
         {
             char hostStr[100];
             ENetAddress address;
             address.port = CONSTPORT;
-            address.host = n;
+            address.host = node;
             enet_address_get_host_ip(&address, hostStr, 100);
-            std::cout << hostStr << std::endl;
+            std::cout << GetIpName(hostStr) << std::endl;
         }
 
         // Connect to new nodes not known before
@@ -139,12 +183,9 @@ void handleReceive(std::string &type, std::string &payload, ENetPeer *peer)
             // gConnectedTo.insert(node);
         }
     }
-    else if (type == "IM_ALIVE")
-    {
-        std::cout << "IM_ALIVE RECV: " << payload << std::endl;
-    }
     else if (type == "ENTER")
     {
+        criticalSection.mTime = max(stoi(payload), criticalSection.mTime) + 1;
         if (criticalSection.mState == CriticalSectionState::FREE)
         {
             send("GRANT", "", peer);
@@ -192,18 +233,19 @@ void Entering()
 
     for (int i = 0; i < 5; i++)
     {
-        std::cout << " ------------------------ I am in the critical section! ------------------------\n";
+        std::cout << " ------------------------ I am in the critical section! ------------------------" << std::endl;
         std::this_thread::sleep_for(1000ms);
     }
 
     criticalSection.mState = CriticalSectionState::FREE;
-
+    std::cout << "Exiting critical section" << std::endl;
     // Exit the critical section ...
     for (auto ip : criticalSection.mRivals)
     {
         ENetPeer *peer = gIpToPeer.at(ip);
         send("GRANT", "", peer);
     }
+    criticalSection.mRivals.clear();
 }
 
 void Request()
@@ -212,6 +254,7 @@ void Request()
     criticalSection.mState = CriticalSectionState::REQUESTED;
     criticalSection.mTime++;
     criticalSection.mMyRequestTime = criticalSection.mTime;
+    std::cout << "Requesting at " << criticalSection.mMyRequestTime << std::endl;
 
     // Send enter message to all other nodes containing the requested
     // critical section, the node's ID and the node's time.
@@ -225,14 +268,14 @@ void Request()
     // Wait until we have all the grants ...
     // TODO: Unsure if this can cause problems
     // Ugly solution with polling...
-    while (criticalSection.mGrantsRecvFrom.size() < gConnectedTo.size() - 1)
+    while (criticalSection.mGrantsRecvFrom.size() < gConnectedTo.size())
     {
         // spin spin spin
         std::this_thread::sleep_for(1ms);
     }
 
     criticalSection.mGrantsRecvFrom.clear();
-
+    std::cout << "Entering" << std::endl;
     Entering();
 }
 
@@ -242,17 +285,35 @@ void Request()
 int main()
 {
 
-    std::cout << "Enter your own IP address: ";
+    std::ifstream infile("myip.txt");
     std::string myIp;
-    std::cin >> myIp;
+    std::getline(infile, myIp);
+
+    if (myIp.empty())
+    {
+        std::cout << "Enter your own IP address: ";
+        std::cin >> myIp;
+        std::ofstream of("myip.txt");
+        of << myIp;
+    }
+
+    std::cout << "Your ip address is:" << myIp << std::endl;
 
     enet_address_set_host(&gMyAddress, myIp.c_str());
 
     std::cout << gMyAddress.host << std::endl;
 
     std::cout << "Enter someone in the overlay networks ip address (or 0 if you're first)" << std::endl;
+
     std::string peerIP;
     std::cin >> peerIP;
+
+    auto it = gAddressMap.find(peerIP);
+    if (it != gAddressMap.end())
+    {
+        peerIP = it->second;
+    }
+
     bool iAmFirst = false;
     if (peerIP == "0")
     {
@@ -309,47 +370,36 @@ int main()
     std::string myRandomNumberStr = std::to_string(myRandomNumber);
     std::cout << "My random number: " << myRandomNumber << std::endl;
 
-    std::mutex mtx;
-
-    std::thread sendThread = std::thread([&]()
-                                         {
-        while(true)
-        {
-            mtx.lock();
-            for (auto ip: gConnectedTo) {
-                ENetPeer *peer = gIpToPeer.at(ip);
-                send("IM_ALIVE", myRandomNumberStr, peer);
-            }
-
-            mtx.unlock();
-            std::this_thread::sleep_for(10s);
-        } });
-
     std::thread sendThread2 = std::thread([&]()
                                           {
-        while(true)
-        {
-            mtx.lock();
-            std::cout << "Hej";
-            Request();
-
-            mtx.unlock();
-            std::this_thread::sleep_for(20s);
-        } });
+                                              while (true)
+                                              {
+                                                  std::mt19937_64 eng{std::random_device{}()};
+                                                  std::uniform_int_distribution<> dist{5, 7};
+                                                  if (gConnectedTo.size() > 0 || iAmFirst)
+                                                  {
+                                                      const auto sleepFor = dist(eng);
+                                                      std::cout << "\nSleeping for " << sleepFor << " seconds." << std::endl;
+                                                      std::this_thread::sleep_for(std::chrono::seconds{sleepFor});
+                                                      Request();
+                                                  }
+                                              }
+                                          });
 
     while (true)
     {
-        mtx.lock();
-
         ENetEvent event;
-        if (enet_host_service(gClient, &event, 0))
-        {
 
+        gEnetMutex.lock();
+        int service = enet_host_service(gClient, &event, 0);
+        gEnetMutex.unlock();
+        if (service)
+        {
             if (event.type == ENET_EVENT_TYPE_CONNECT)
             {
                 char hostStr[100];
                 enet_address_get_host_ip(&event.peer->address, hostStr, 100);
-                std::cout << "Connection to " << hostStr << " succeeded." << std::endl;
+                std::cout << "Connection to " << GetIpName(hostStr) << " succeeded." << std::endl;
 
                 gConnectedTo.insert(event.peer->address.host);
                 gIpToPeer.insert(std::pair(event.peer->address.host, event.peer));
@@ -363,28 +413,37 @@ int main()
                     ENetPeer *peer = gIpToPeer.at(ip);
                     send("NETWORK", outPayload, peer);
                 }
+
+                if (criticalSection.mState == CriticalSectionState::REQUESTED)
+                {
+                    send("ENTER", std::to_string(criticalSection.mMyRequestTime), event.peer);
+                }
             }
 
             if (event.type == ENET_EVENT_TYPE_DISCONNECT)
             {
                 char hostStr[100];
                 enet_address_get_host_ip(&event.peer->address, hostStr, 100);
-                std::cout << "Disconnection from " << hostStr << " succeeded." << std::endl;
+                std::cout << "DISCONNECTION FROM " << GetIpName(hostStr) << "!" << std::endl;
                 auto it = gKnownNodes.find(event.peer->address.host);
                 if (it != gKnownNodes.end())
                 {
                     gKnownNodes.erase(it);
                 }
+
             }
 
             if (event.type == ENET_EVENT_TYPE_RECEIVE)
             {
                 std::vector<std::string> recvDataDecode = split((char *)event.packet->data, ';');
+                if (recvDataDecode.size() == 1)
+                {
+                    // if the payload is non-existent, then we add an empty payload
+                    recvDataDecode.push_back("");
+                }
                 handleReceive(recvDataDecode[0], recvDataDecode[1], event.peer);
             }
         }
-
-        mtx.unlock();
 
         std::this_thread::sleep_for(10ms);
 
