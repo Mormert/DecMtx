@@ -6,7 +6,7 @@
 
 #define ENET_BUILDING_LIB 1
 #include "enet/enet.h"
-#include <stdlib.h>
+#include <stdio.h>
 #include <windows.h>
 #include <mmsystem.h>
 

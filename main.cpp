@@ -287,8 +287,6 @@ int main()
 
     enet_address_set_host(&gMyAddress, myIp.c_str());
 
-    std::cout << gMyAddress.host << std::endl;
-
     std::cout << "Enter someone in the overlay networks ip address (or 0 if you're first)" << std::endl;
 
     std::string peerIP;
