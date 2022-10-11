@@ -47,6 +47,8 @@
 
 #ifdef HAS_FCNTL
 #include <fcntl.h>
+#include <printf.h>
+
 #endif
 
 #ifdef HAS_POLL
@@ -96,7 +98,7 @@ enet_time_set (enet_uint32 newTimeBase)
     struct timeval timeVal;
 
     gettimeofday (& timeVal, NULL);
-    
+
     timeBase = timeVal.tv_sec * 1000 + timeVal.tv_usec / 1000 - newTimeBase;
 }
 
@@ -106,7 +108,7 @@ enet_address_set_host_ip (ENetAddress * address, const char * name)
 #ifdef HAS_INET_PTON
     if (! inet_pton (AF_INET, name, & address -> host))
 #else
-    if (! inet_aton (name, (struct in_addr *) & address -> host))
+        if (! inet_aton (name, (struct in_addr *) & address -> host))
 #endif
         return -1;
 
@@ -123,7 +125,7 @@ enet_address_set_host (ENetAddress * address, const char * name)
     hints.ai_family = AF_INET;
 
     if (getaddrinfo (name, NULL, NULL, & resultList) != 0)
-      return -1;
+        return -1;
 
     for (result = resultList; result != NULL; result = result -> ai_next)
     {
@@ -140,7 +142,7 @@ enet_address_set_host (ENetAddress * address, const char * name)
     }
 
     if (resultList != NULL)
-      freeaddrinfo (resultList);
+        freeaddrinfo (resultList);
 #else
     struct hostent * hostEntry = NULL;
 #ifdef HAS_GETHOSTBYNAME_R
@@ -174,14 +176,14 @@ enet_address_get_host_ip (const ENetAddress * address, char * name, size_t nameL
 #ifdef HAS_INET_NTOP
     if (inet_ntop (AF_INET, & address -> host, name, nameLength) == NULL)
 #else
-    char * addr = inet_ntoa (* (struct in_addr *) & address -> host);
+        char * addr = inet_ntoa (* (struct in_addr *) & address -> host);
     if (addr != NULL)
     {
         size_t addrLen = strlen(addr);
         if (addrLen >= nameLength)
           return -1;
         memcpy (name, addr, addrLen + 1);
-    } 
+    }
     else
 #endif
         return -1;
@@ -205,11 +207,11 @@ enet_address_get_host (const ENetAddress * address, char * name, size_t nameLeng
     if (! err)
     {
         if (name != NULL && nameLength > 0 && ! memchr (name, '\0', nameLength))
-          return -1;
+            return -1;
         return 0;
     }
     if (err != EAI_NONAME)
-      return -1;
+        return -1;
 #else
     struct in_addr in;
     struct hostent * hostEntry = NULL;
@@ -255,18 +257,18 @@ enet_socket_bind (ENetSocket socket, const ENetAddress * address)
 
     if (address != NULL)
     {
-       sin.sin_port = ENET_HOST_TO_NET_16 (address -> port);
-       sin.sin_addr.s_addr = address -> host;
+        sin.sin_port = ENET_HOST_TO_NET_16 (address -> port);
+        sin.sin_addr.s_addr = address -> host;
     }
     else
     {
-       sin.sin_port = 0;
-       sin.sin_addr.s_addr = INADDR_ANY;
+        sin.sin_port = 0;
+        sin.sin_addr.s_addr = INADDR_ANY;
     }
 
     return bind (socket,
                  (struct sockaddr *) & sin,
-                 sizeof (struct sockaddr_in)); 
+                 sizeof (struct sockaddr_in));
 }
 
 int
@@ -276,7 +278,7 @@ enet_socket_get_address (ENetSocket socket, ENetAddress * address)
     socklen_t sinLength = sizeof (struct sockaddr_in);
 
     if (getsockname (socket, (struct sockaddr *) & sin, & sinLength) == -1)
-      return -1;
+        return -1;
 
     address -> host = (enet_uint32) sin.sin_addr.s_addr;
     address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
@@ -284,7 +286,7 @@ enet_socket_get_address (ENetSocket socket, ENetAddress * address)
     return 0;
 }
 
-int 
+int
 enet_socket_listen (ENetSocket socket, int backlog)
 {
     return listen (socket, backlog < 0 ? SOMAXCONN : backlog);
@@ -386,7 +388,7 @@ enet_socket_connect (ENetSocket socket, const ENetAddress * address)
 
     result = connect (socket, (struct sockaddr *) & sin, sizeof (struct sockaddr_in));
     if (result == -1 && errno == EINPROGRESS)
-      return 0;
+        return 0;
 
     return result;
 }
@@ -398,12 +400,12 @@ enet_socket_accept (ENetSocket socket, ENetAddress * address)
     struct sockaddr_in sin;
     socklen_t sinLength = sizeof (struct sockaddr_in);
 
-    result = accept (socket, 
-                     address != NULL ? (struct sockaddr *) & sin : NULL, 
+    result = accept (socket,
+                     address != NULL ? (struct sockaddr *) & sin : NULL,
                      address != NULL ? & sinLength : NULL);
-    
+
     if (result == -1)
-      return ENET_SOCKET_NULL;
+        return ENET_SOCKET_NULL;
 
     if (address != NULL)
     {
@@ -412,8 +414,8 @@ enet_socket_accept (ENetSocket socket, ENetAddress * address)
     }
 
     return result;
-} 
-    
+}
+
 int
 enet_socket_shutdown (ENetSocket socket, ENetSocketShutdown how)
 {
@@ -424,7 +426,7 @@ void
 enet_socket_destroy (ENetSocket socket)
 {
     if (socket != -1)
-      close (socket);
+        close (socket);
 }
 
 int
@@ -435,7 +437,7 @@ enet_socket_send (ENetSocket socket,
 {
     struct msghdr msgHdr;
     struct sockaddr_in sin;
-    int sentLength;
+    int sentLength = 0;
 
     memset (& msgHdr, 0, sizeof (struct msghdr));
 
@@ -454,14 +456,21 @@ enet_socket_send (ENetSocket socket,
     msgHdr.msg_iov = (struct iovec *) buffers;
     msgHdr.msg_iovlen = bufferCount;
 
-    sentLength = sendmsg (socket, & msgHdr, MSG_NOSIGNAL);
-    
+    float random_variable = ((double)rand() / (RAND_MAX));
+    if (random_variable <= 0.95)
+    {
+        sentLength = sendmsg(socket, &msgHdr, MSG_NOSIGNAL);
+    }
+    else{
+        printf("MESSAGE SEND LOSS SIMULATION\n");
+    }
+
     if (sentLength == -1)
     {
-       if (errno == EWOULDBLOCK)
-         return 0;
+        if (errno == EWOULDBLOCK)
+            return 0;
 
-       return -1;
+        return -1;
     }
 
     return sentLength;
@@ -492,15 +501,15 @@ enet_socket_receive (ENetSocket socket,
 
     if (recvLength == -1)
     {
-       if (errno == EWOULDBLOCK)
-         return 0;
+        if (errno == EWOULDBLOCK)
+            return 0;
 
-       return -1;
+        return -1;
     }
 
 #ifdef HAS_MSGHDR_FLAGS
     if (msgHdr.msg_flags & MSG_TRUNC)
-      return -1;
+        return -1;
 #endif
 
     if (address != NULL)
@@ -577,10 +586,10 @@ enet_socket_wait (ENetSocket socket, enet_uint32 * condition, enet_uint32 timeou
     FD_ZERO (& writeSet);
 
     if (* condition & ENET_SOCKET_WAIT_SEND)
-      FD_SET (socket, & writeSet);
+        FD_SET (socket, & writeSet);
 
     if (* condition & ENET_SOCKET_WAIT_RECEIVE)
-      FD_SET (socket, & readSet);
+        FD_SET (socket, & readSet);
 
     selectCount = select (socket + 1, & readSet, & writeSet, NULL, & timeVal);
 
@@ -592,20 +601,20 @@ enet_socket_wait (ENetSocket socket, enet_uint32 * condition, enet_uint32 timeou
 
             return 0;
         }
-      
+
         return -1;
     }
 
     * condition = ENET_SOCKET_WAIT_NONE;
 
     if (selectCount == 0)
-      return 0;
+        return 0;
 
     if (FD_ISSET (socket, & writeSet))
-      * condition |= ENET_SOCKET_WAIT_SEND;
+        * condition |= ENET_SOCKET_WAIT_SEND;
 
     if (FD_ISSET (socket, & readSet))
-      * condition |= ENET_SOCKET_WAIT_RECEIVE;
+        * condition |= ENET_SOCKET_WAIT_RECEIVE;
 
     return 0;
 #endif
